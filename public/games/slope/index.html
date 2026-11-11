@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Neon Horizon</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    body {
+      background: #020617;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 12px;
+      overflow: hidden;
+    }
+    .hud {
+      width: 100%;
+      max-width: 480px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .hud-title { font-size: 20px; font-weight: 800; color: #38bdf8; }
+    .hud-stats { display: flex; gap: 12px; }
+    .stat-box {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      padding: 4px 10px;
+      border-radius: 6px;
+      text-align: center;
+    }
+    .stat-label { font-size: 9px; text-transform: uppercase; color: #94a3b8; }
+    .stat-val { font-size: 16px; font-weight: 700; color: #38bdf8; font-variant-numeric: tabular-nums; }
+    .canvas-box {
+      position: relative;
+      width: 100%;
+      max-width: 480px;
+      aspect-ratio: 4/3;
+      background: #020617;
+      border: 2px solid #1e293b;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.7);
+    }
+    canvas { width: 100%; height: 100%; display: block; }
+    .overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(2, 6, 23, 0.85);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      backdrop-filter: blur(4px);
+    }
+    .overlay.hidden { display: none; }
+    .overlay h2 { font-size: 28px; font-weight: 800; color: #38bdf8; }
+    .btn {
+      background: #0284c7;
+      color: #fff;
+      border: none;
+      padding: 10px 24px;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .hint { margin-top: 8px; font-size: 12px; color: #64748b; }
+  </style>
+</head>
+<body>
+  <div class="hud">
+    <div class="hud-title">NEON HORIZON</div>
+    <div class="hud-stats">
+      <div class="stat-box">
+        <div class="stat-label">Distance</div>
+        <div class="stat-val" id="score">0m</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">Best</div>
+        <div class="stat-val" id="best">0m</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="canvas-box">
+    <canvas id="canvas" width="480" height="360"></canvas>
+    <div class="overlay" id="overlay">
+      <h2 id="msg">NEON HORIZON</h2>
+      <button class="btn" id="btn">Engage Throttle</button>
+    </div>
+  </div>
+  <div class="hint">Left/Right or A/D or Touch/Mouse drag to steer ship across grid</div>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const bestEl = document.getElementById('best');
+    const overlay = document.getElementById('overlay');
+    const msg = document.getElementById('msg');
+    const btn = document.getElementById('btn');
+
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function beep(freq, dur = 0.05) {
+      try {
+        const osc = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        g.gain.setValueAtTime(0.08, audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+        osc.connect(g);
+        g.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + dur);
+      } catch(e) {}
+    }
+
+    let shipX = 0; // -1 to 1 normalized
+    let targetX = 0;
+    let speed = 4;
+    let distance = 0;
+    let bestDist = parseInt(localStorage.getItem('horizon_best') || '0', 10);
+    bestEl.textContent = bestDist + 'm';
+    let isPlaying = false;
+    let obstacles = [];
+    let horizonY = 130;
+    let animId = null;
+
+    let keys = {};
+    window.addEventListener('keydown', e => keys[e.code] = true);
+    window.addEventListener('keyup', e => keys[e.code] = false);
+
+    function start() {
+      shipX = 0;
+      targetX = 0;
+      speed = 4;
+      distance = 0;
+      obstacles = [];
+      overlay.classList.add('hidden');
+      isPlaying = true;
+    }
+
+    function gameOver() {
+      isPlaying = false;
+      beep(140, 0.4);
+      if (distance > bestDist) {
+        bestDist = distance;
+        localStorage.setItem('horizon_best', bestDist);
+        bestEl.textContent = bestDist + 'm';
+      }
+      msg.textContent = 'SHIP CRASHED';
+      btn.textContent = 'Retry Run';
+      overlay.classList.remove('hidden');
+    }
+
+    function spawnObstacle() {
+      const lane = (Math.random() * 2 - 1) * 0.75;
+      obstacles.push({
+        lane: lane,
+        z: 300, // Distance away
+        w: 0.28
+      });
+    }
+
+    let frame = 0;
+    function loop() {
+      frame++;
+
+      if (isPlaying) {
+        if (keys['ArrowLeft'] || keys['KeyA']) targetX = Math.max(-0.85, targetX - 0.04);
+        if (keys['ArrowRight'] || keys['KeyD']) targetX = Math.min(0.85, targetX + 0.04);
+
+        shipX += (targetX - shipX) * 0.2;
+        distance += Math.round(speed / 2);
+        scoreEl.textContent = distance + 'm';
+        speed = 4 + Math.min(8, distance / 300);
+
+        if (frame % Math.max(25, Math.floor(70 - speed * 3)) === 0) {
+          spawnObstacle();
+        }
+
+        // Update obstacles
+        for (let i = obstacles.length - 1; i >= 0; i--) {
+          const obs = obstacles[i];
+          obs.z -= speed;
+
+          // Collision test when z reaches ship plane (around z = 20 to 0)
+          if (obs.z <= 25 && obs.z >= -10) {
+            if (Math.abs(shipX - obs.lane) < obs.w / 2 + 0.1) {
+              gameOver();
+              break;
+            }
+          }
+
+          if (obs.z < -30) obstacles.splice(i, 1);
+        }
+      }
+
+      // Draw 3D Grid & Sky
+      ctx.fillStyle = '#020617';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Neon Sun
+      const sunGrad = ctx.createRadialGradient(240, horizonY - 10, 5, 240, horizonY - 10, 60);
+      sunGrad.addColorStop(0, '#f43f5e');
+      sunGrad.addColorStop(1, 'transparent');
+      ctx.fillStyle = sunGrad;
+      ctx.fillRect(0, 0, canvas.width, horizonY + 30);
+
+      // Neon grid lines on ground
+      ctx.strokeStyle = '#0284c7';
+      ctx.lineWidth = 1;
+      const fOffset = (frame * speed * 2) % 40;
+
+      // Horizontal perspective grid
+      for (let d = 0; d < 12; d++) {
+        const factor = Math.pow((d * 25 + fOffset) / 300, 2);
+        const y = horizonY + factor * (canvas.height - horizonY);
+        if (y < canvas.height) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(canvas.width, y);
+          ctx.stroke();
+        }
+      }
+
+      // Vanishing longitudinal grid lines
+      for (let x = -8; x <= 8; x++) {
+        ctx.beginPath();
+        ctx.moveTo(240 + x * 10, horizonY);
+        ctx.lineTo(240 + x * 65, canvas.height);
+        ctx.stroke();
+      }
+
+      // Draw Obstacles in 3D projection
+      obstacles.forEach(obs => {
+        if (obs.z < 0) return;
+        const scale = 150 / (obs.z + 50);
+        const screenX = 240 + obs.lane * 220 * scale;
+        const screenY = horizonY + (obs.z > 0 ? (1 - obs.z / 300) * 190 : 200);
+        const w = obs.w * 160 * scale;
+        const h = 45 * scale;
+
+        ctx.fillStyle = '#f43f5e';
+        ctx.shadowColor = '#f43f5e';
+        ctx.shadowBlur = 10;
+        ctx.fillRect(screenX - w / 2, screenY - h, w, h);
+        ctx.fillStyle = '#fda4af';
+        ctx.fillRect(screenX - w / 2 + 2, screenY - h + 2, w - 4, 4);
+        ctx.shadowBlur = 0;
+      });
+
+      // Draw Ship
+      const shipScreenX = 240 + shipX * 180;
+      const shipScreenY = canvas.height - 35;
+
+      ctx.save();
+      ctx.translate(shipScreenX, shipScreenY);
+      ctx.fillStyle = '#38bdf8';
+      ctx.shadowColor = '#38bdf8';
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.moveTo(0, -18);
+      ctx.lineTo(16, 12);
+      ctx.lineTo(0, 6);
+      ctx.lineTo(-16, 12);
+      ctx.closePath();
+      ctx.fill();
+
+      // Thruster flame
+      ctx.fillStyle = '#f59e0b';
+      ctx.beginPath();
+      ctx.moveTo(-6, 8);
+      ctx.lineTo(0, 16 + (frame % 4) * 3);
+      ctx.lineTo(6, 8);
+      ctx.fill();
+      ctx.restore();
+
+      animId = requestAnimationFrame(loop);
+    }
+
+    canvas.addEventListener('mousemove', e => {
+      const rect = canvas.getBoundingClientRect();
+      const nx = (e.clientX - rect.left) / rect.width;
+      targetX = (nx * 2 - 1) * 0.85;
+    });
+
+    canvas.addEventListener('touchmove', e => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const nx = (e.touches[0].clientX - rect.left) / rect.width;
+      targetX = (nx * 2 - 1) * 0.85;
+    }, { passive: false });
+
+    btn.addEventListener('click', start);
+    loop();
+  </script>
+</body>
+</html>

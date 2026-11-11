@@ -1,0 +1,6 @@
+{
+  "name": "Nova Unblocked Arcade",
+  "description": "A high-performance unblocked gaming portal with an iframe JSON repository, fullscreen theater mode, and tab cloak features.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
