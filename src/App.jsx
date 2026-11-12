@@ -86,7 +86,8 @@ export default function App() {
           return;
         }
 
-        const res = await fetch('/games.json');
+        const jsonUrl = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/games.json`;
+        const res = await fetch(jsonUrl);
         if (res.ok) {
           const data = await res.json();
           setGames(data);
@@ -168,7 +169,8 @@ export default function App() {
 
   const handleResetToDefault = async () => {
     try {
-      const res = await fetch('/games.json');
+      const jsonUrl = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/games.json`;
+      const res = await fetch(jsonUrl);
       if (res.ok) {
         const data = await res.json();
         setGames(data);

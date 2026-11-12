@@ -179,7 +179,11 @@ export const GamePlayerModal = ({
         >
           <iframe
             key={iframeKey}
-            src={game.iframeSrc}
+            src={
+              (game.iframeSrc || '').startsWith('/games/')
+                ? `${import.meta.env.BASE_URL.replace(/\/$/, '')}${game.iframeSrc}`
+                : game.iframeSrc
+            }
             title={game.title}
             className="w-full h-full border-0 select-none"
             allow="autoplay; fullscreen; keyboard; gamepad"
